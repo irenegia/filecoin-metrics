@@ -814,7 +814,7 @@ def main():
                         help="Path to the 'Cost of 33%% attack' spreadsheet CSV for precise attack cost data")
     args = parser.parse_args()
 
-    out_path = args.output or str(Path(__file__).parent / "filecoin_l1_health.html")
+    out_path = args.output or str(Path(__file__).parent / "filecoin_l1_health_dashboard.html")
 
     log("Starting dashboard update …")
     con = duckdb.connect()
