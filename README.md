@@ -6,6 +6,8 @@ A collection of Filecoin metrics dashboards. All dashboards are self-contained H
 
 ### [L1 Health Metrics](https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html)
 
+**Live dashboard:** <https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html>
+
 Companion charts for the [L1 Health Metrics Framework](https://docs.google.com/document/d/1zuFRFTgjRFMagiH8MhMJwmL2FZBMhKP7lAv0ooUb6Jc) report.
 
 - **Decentralization** — reward concentration (top 1/5/10 owner share), active owner count, Nakamoto Coefficient @33%
