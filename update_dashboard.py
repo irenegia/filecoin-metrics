@@ -129,7 +129,7 @@ def fetch_all(con, attack_cost_csv=None):
         WITH daily_owner AS (
             SELECT d.date, s.owner_id, SUM(d.block_rewards_fil) AS rewards
             FROM '{sp_daily_path}' d
-            JOIN '{sp_static_path}' s ON d.provider_id = s.provider_id
+            JOIN '{sp_static_path}' s ON d.storage_provider_id = s.storage_provider_id
             GROUP BY d.date, s.owner_id
         ),
         daily_shares AS (
@@ -180,7 +180,7 @@ def fetch_all(con, attack_cost_csv=None):
                    s.owner_id,
                    SUM(d.block_rewards_fil) AS rewards
             FROM '{sp_daily_path}' d
-            JOIN '{sp_static_path}' s ON d.provider_id = s.provider_id
+            JOIN '{sp_static_path}' s ON d.storage_provider_id = s.storage_provider_id
             GROUP BY month, s.owner_id
         ),
         ranked AS (
