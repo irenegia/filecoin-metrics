@@ -29,7 +29,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase
           git add EconomyFlows/seed.json
           git diff --cached --quiet || git commit -m "Auto-update Economy Flows data $(date -u +%Y-%m-%d)"
+          git pull --rebase
           git push
