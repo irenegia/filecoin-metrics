@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Filecoin Economy Flows</title>
-<meta name="description" content="Live view of FIL supply, issuance and burn. Ultrasound.money style, for Filecoin.">
+<meta name="description" content="FIL supply, issuance and burn, ultrasound.money style. Filecoin Data Portal data, refreshed daily.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#128293;</text></svg>">
 <style>
   :root {
@@ -106,7 +106,7 @@
 <header>
   <div>
     <h1>Filecoin Economy Flows</h1>
-    <div class="tagline">FIL supply, issuance and burn. Live, from public APIs.</div>
+    <div class="tagline">FIL supply, issuance and burn. Filecoin Data Portal data, refreshed daily.</div>
   </div>
   <div style="text-align:right">
     <span class="chip">FIL <b id="price">&hellip;</b></span>
@@ -118,18 +118,18 @@
 
   <section aria-label="Headline numbers">
     <div class="tiles" id="tiles"></div>
-    <div class="src">Source, fetched on load: <a href="https://networkhealth.starboard.ventures" target="_blank" rel="noopener">Starboard Network Health API</a> (daily, cumulative counters) &middot; price: CoinGecko.</div>
+    <div class="src">Source: <a href="https://filecoindataportal.xyz" target="_blank" rel="noopener">Filecoin Data Portal</a> daily network metrics, rebuilt into this page's data file every day (see Method) &middot; price: CoinGecko, fetched live.</div>
   </section>
 
   <section>
     <h2>Supply</h2>
-    <div class="sub">Circulating FIL, protocol definition, since mainnet launch (Oct 2020).</div>
+    <div class="sub">Circulating FIL, protocol definition, since network genesis (Aug 2020).</div>
     <div class="cards">
       <div class="card wide">
         <div class="chart-title">Circulating supply, FIL</div>
         <div class="chartbox" id="ch-supply"></div>
         <div class="strip" id="strip"></div>
-        <div class="src">Monthly history: embedded snapshot of the same Starboard series (immutable past). Latest point and the accounting line: live. Vested includes mining-reserve disbursements.</div>
+        <div class="src">Portal series <code>circulating_fil</code>, monthly, plus the latest day. The accounting line is the latest day; vested includes mining-reserve disbursements, recovered from the supply identity.</div>
       </div>
     </div>
   </section>
@@ -173,6 +173,7 @@
       </div>
       <div id="lb"></div>
       <div class="note" id="lb-note"></div>
+      <div class="src">Burn by mechanism: Starboard Network Health API, pulled by the same daily rebuild; the portal's daily metrics do not itemize burn by mechanism reliably (see Method). FOC row: FOC contract index.</div>
     </div>
   </section>
 
@@ -184,8 +185,8 @@
   <footer>
     <h3>Method</h3>
     <ul>
-      <li><b>Live on every load:</b> latest supply row, last 90 days of daily data, a 365-days-ago reference row, and the burn breakdown, all from the <a href="https://networkhealth.starboard.ventures" target="_blank" rel="noopener">Starboard Network Health API</a> (endpoints <code>/v2/v2/circulating_supply/circulating_supply</code> and <code>/v2/v2/gas/daily_network_fee_breakdown</code>, window capped at 90 days per request). FIL price from CoinGecko.</li>
-      <li><b>Embedded history:</b> monthly values before the current period ship in <a href="seed.json">seed.json</a>, built 2026-08-26 by chunked pulls of the same two Starboard endpoints from 2020-10-15. Cumulative past data is immutable, so this never goes stale; the live tail is appended on load.</li>
+      <li><b>Backbone, rebuilt daily:</b> everything on this page except the FIL price is read from <a href="seed.json">seed.json</a>, which a <a href="https://github.com/irenegia/filecoin-metrics/blob/main/.github/workflows/update-economy-flows.yml" target="_blank" rel="noopener">GitHub Action</a> rebuilds every day around 07:00 UTC by running <a href="https://github.com/irenegia/filecoin-metrics/blob/main/EconomyFlows/build_seed.py" target="_blank" rel="noopener">build_seed.py</a> against the <a href="https://filecoindataportal.xyz" target="_blank" rel="noopener">Filecoin Data Portal</a> dataset <code>daily_network_metrics.parquet</code> (cumulative daily supply, issuance and burn). The browser fetches no chain data; the only live call is the CoinGecko price.</li>
+      <li><b>Burn by mechanism</b> is the one series not from the portal: its daily metrics do not itemize burn by mechanism reliably (recent rows zero the breakdown columns while total burn continues; checked 2026-08-26), so the same daily rebuild pulls the split from the <a href="https://networkhealth.starboard.ventures" target="_blank" rel="noopener">Starboard Network Health API</a> (<code>/v2/v2/gas/daily_network_fee_breakdown</code>).</li>
       <li><b>Filecoin Onchain Cloud row:</b> FOC contract index (FilecoinPay + PDPVerifier events, <a href="https://github.com/FilOzone/filecoin-pay" target="_blank" rel="noopener">FilOzone/filecoin-pay</a>), as of 2026-08-26: 63.30 FIL burned via 49 fee-auction claims plus 1.44 FIL of PDP proof fees, plus negligible direct FIL-rail fees.</li>
       <li><b>Definitions:</b> circulating supply per the protocol definition. Issuance = mined block rewards. Burn = base fees + gas overestimation + batch fees + SP penalties; miner tips are excluded (paid to block producers, not burned). Deliberately out of scope: business-lens metrics such as the revenue coverage ratio (burn vs block rewards + public goods funding); those live in the <a href="https://irenegia.github.io/filecoin-pay-fee-dial/flows.html" target="_blank" rel="noopener">FIL Flowmeter</a>.</li>
     </ul>
@@ -197,13 +198,11 @@
   </footer>
 </main>
 <div id="tip" role="tooltip"></div>
-<noscript><p>This page needs JavaScript: it fetches live Filecoin supply data on load.</p></noscript>
+<noscript><p>This page needs JavaScript: it loads its data file and renders the charts on load.</p></noscript>
 <script>
 "use strict";
 /* ---------- constants ---------- */
-const SB = "https://networkhealth.starboard.ventures/v2";
 const FOC = { fil: 64.73, auctions: 63.30, claims: 49, proof: 1.44, asOf: "2026-08-26" };
-const SEED_BUILT = "2026-08-26";
 
 /* ---------- formatting ---------- */
 const fmtN = v => { const a = Math.abs(v);
@@ -216,7 +215,6 @@ const fmtAx = v => { const a = Math.abs(v);
 const fmtPct1 = v => v.toFixed(1) + "%";
 const monthLabel = m => { const [y, mm] = m.split("-");
   return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+mm-1] + " " + y.slice(2); };
-const iso = d => d.toISOString().slice(0, 10);
 
 /* ---------- tooltip ---------- */
 const tip = document.getElementById("tip");
@@ -299,45 +297,33 @@ async function j(url, timeoutMs = 12000) {
   try { const r = await fetch(url, { signal: c.signal }); if (!r.ok) throw new Error(r.status); return await r.json(); }
   finally { clearTimeout(t); }
 }
-const sbData = p => p && p.code === 0 && Array.isArray(p.data) ? p.data : null;
 function monthDays(m) {
-  if (m === "2020-10") return 17; /* mainnet launched Oct 15 2020 */
   const [y, mm] = m.split("-").map(Number);
   return new Date(Date.UTC(y, mm, 0)).getUTCDate();
 }
 
 async function main() {
-  const now = new Date();
-  const today = iso(now);
-  const d88 = iso(new Date(now - 88 * 864e5)); /* API caps windows at 90 days */
-  const y0 = iso(new Date(now - 367 * 864e5)), y1 = iso(new Date(now - 364 * 864e5));
-  const [seedR, sumR, tailR, yearR, gasR, priceR] = await Promise.allSettled([
+  const [seedR, priceR] = await Promise.allSettled([
     j("./seed.json"),
-    j(`${SB}/v1/network_core/circulating-supply/circulating_supply`),
-    j(`${SB}/v2/circulating_supply/circulating_supply?start_date=${d88}&end_date=${today}`),
-    j(`${SB}/v2/circulating_supply/circulating_supply?start_date=${y0}&end_date=${y1}`),
-    j(`${SB}/v2/gas/daily_network_fee_breakdown?start_date=${d88}&end_date=${today}`),
     j("https://api.coingecko.com/api/v3/simple/price?ids=filecoin&vs_currencies=usd")
   ]);
   if (seedR.status !== "fulfilled") {
     const e = document.getElementById("err");
-    e.style.display = "block"; e.textContent = "Could not load seed.json, so the history charts are unavailable. Live headline numbers may still work.";
+    e.style.display = "block"; e.textContent = "Could not load seed.json, so the page has no data to show.";
   }
   const seed = seedR.status === "fulfilled" ? seedR.value : { supply: [], gas: [] };
-  const sum = sumR.status === "fulfilled" ? sbData(sumR.value) : null;
-  const tail = tailR.status === "fulfilled" ? sbData(tailR.value) : null;
-  const year = yearR.status === "fulfilled" ? sbData(yearR.value) : null;
-  const gas = gasR.status === "fulfilled" ? sbData(gasR.value) : null;
-  const live = !!(sum && sum.length);
+  const latest = seed.latest || null;
+  const tail = seed.tail || null;
+  const year = seed.yearAgo ? [seed.yearAgo] : null;
+  const gas = seed.gasTail || null;
 
   /* latest cumulative row */
   const lastSeed = seed.supply[seed.supply.length - 1];
-  const latest = live ? sum[sum.length - 1] : (tail && tail.length ? tail[tail.length - 1] : null);
   const L = latest || (lastSeed ? { stat_date: lastSeed[0] + "-31", circulating_fil: lastSeed[1], mined_fil: lastSeed[2],
     vested_fil: lastSeed[3], reserve_disbursed_fil: 0, locked_fil: lastSeed[4], burnt_fil: lastSeed[5] } : null);
   const asOf = L ? String(L.stat_date).slice(0, 10) : "?";
   document.getElementById("stamp").textContent = latest
-    ? "live · data through " + asOf : "live fetch failed · snapshot through " + SEED_BUILT;
+    ? "data through " + asOf + " · rebuilt daily from the Filecoin Data Portal" : "could not load data";
 
   if (priceR.status === "fulfilled" && priceR.value.filecoin)
     document.getElementById("price").textContent = "$" + priceR.value.filecoin.usd.toFixed(3);
@@ -360,12 +346,12 @@ async function main() {
   /* hero tiles */
   const tiles = [
     { lbl: "Circulating supply", val: L ? fmtN(L.circulating_fil) + " FIL" : "n/a",
-      d: latest && latest.circulating_fil_increase != null ? (latest.circulating_fil_increase >= 0 ? "+" : "") + fmtN(latest.circulating_fil_increase) + " FIL past 24h" : "as of " + asOf },
+      d: latest && latest.circulating_fil_increase != null ? (latest.circulating_fil_increase >= 0 ? "+" : "") + fmtN(latest.circulating_fil_increase) + " FIL on " + asOf : "as of " + asOf },
     { lbl: "Supply growth", val: growthYr != null ? (growthYr >= 0 ? "+" : "") + growthYr.toFixed(1) + "%/yr" : "n/a",
       d: "trailing 365d (ETH: about +1%/yr)" },
-    { lbl: "Issuance, 24h", val: latest && latest.mined_fil_increase != null ? fmtN(latest.mined_fil_increase) + " FIL" : "n/a",
+    { lbl: "Issuance, daily", val: latest && latest.mined_fil_increase != null ? fmtN(latest.mined_fil_increase) + " FIL" : "n/a",
       d: "block rewards minted" },
-    { lbl: "Burn, 24h", val: latest && latest.burnt_fil_increase != null ? fmtN(latest.burnt_fil_increase) + " FIL" : "n/a",
+    { lbl: "Burn, daily", val: latest && latest.burnt_fil_increase != null ? fmtN(latest.burnt_fil_increase) + " FIL" : "n/a",
       d: L ? fmtN(L.burnt_fil) + " FIL burned all time" : "" },
   ];
   document.getElementById("tiles").innerHTML = tiles.map(t =>
@@ -393,8 +379,8 @@ async function main() {
       offM.push((S[i][5] - S[i-1][5]) / (S[i][2] - S[i-1][2]) * 100);
     }
     let mtdIndex;
-    const curM = today.slice(0, 7);
-    if (latest && tail && String(latest.stat_date).slice(0, 7) === curM && labels[labels.length-1] !== curM) {
+    const curM = String((latest && latest.stat_date) || "").slice(0, 7);
+    if (latest && tail && curM > labels[labels.length - 1]) {
       const eom = tail.find(r => String(r.stat_date).slice(0, 10) === labels[labels.length-1] + "-" + String(monthDays(labels[labels.length-1])).padStart(2, "0"));
       const base = eom || { mined_fil: S[S.length-1][2], burnt_fil: S[S.length-1][5] };
       const days = +String(latest.stat_date).slice(8, 10);
@@ -420,9 +406,9 @@ async function main() {
   /* offset tiles */
   const ot = [
     { lbl: "Issuance offset, 365d", val: off365 != null ? (off365 * 100).toFixed(1) + "%" : "n/a",
-      d: off365 != null ? "Filecoin burns " + (off365 * 100).toFixed(1) + "% of what it issues (= " + off365.toFixed(2) + "x)" : "needs the live 365d reference" },
+      d: off365 != null ? "Filecoin burns " + (off365 * 100).toFixed(1) + "% of what it issues (= " + off365.toFixed(2) + "x)" : "365d reference missing from the data file" },
     { lbl: "Issuance offset, 30d", val: off30 != null ? (off30 * 100).toFixed(1) + "%" : "n/a",
-      d: off30 != null ? "= " + off30.toFixed(2) + "x of issuance" : "needs the live 90d window" },
+      d: off30 != null ? "= " + off30.toFixed(2) + "x of issuance" : "daily tail missing from the data file" },
   ];
   document.getElementById("offset-tiles").innerHTML = ot.map(t =>
     `<div class="tile"><div class="lbl">${t.lbl}</div><div class="val">${t.val}</div><div class="d">${t.d}</div></div>`).join("");
@@ -446,7 +432,7 @@ async function main() {
   function renderLb(w) {
     const a = lbData(w);
     const lb = document.getElementById("lb");
-    if (!a) { lb.innerHTML = '<div class="note">Live burn breakdown unavailable (fetch failed). Try the all-time view.</div>'; return; }
+    if (!a) { lb.innerHTML = '<div class="note">Burn breakdown missing from the data file. Try the all-time view.</div>'; return; }
     const items = [3,0,1,2].map(i => ({ name: NAMES[i], v: a[i] })).sort((x, y) => y.v - x.v);
     const mx = Math.max(...items.map(i => i.v), FOC.fil);
     lb.innerHTML = items.map(i =>

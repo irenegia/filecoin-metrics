@@ -1,0 +1,35 @@
+name: Update Economy Flows Data
+
+on:
+  schedule:
+    # Runs every day at 07:00 UTC
+    - cron: "0 7 * * *"
+  workflow_dispatch:       # lets you click "Run workflow" in GitHub UI anytime
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # needed to push the updated seed.json
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install duckdb
+
+      - name: Rebuild seed.json
+        run: python EconomyFlows/build_seed.py
+
+      - name: Commit & push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase
+          git add EconomyFlows/seed.json
+          git diff --cached --quiet || git commit -m "Auto-update Economy Flows data $(date -u +%Y-%m-%d)"
+          git push

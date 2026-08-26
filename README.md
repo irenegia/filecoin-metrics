@@ -15,7 +15,7 @@ An ultrasound.money-style live view of the FIL token economy, supply lens only:
 - **Issuance offset** — burn as a share of issuance (1.0x = supply-neutral), trailing 365d/30d and monthly
 - **Burn leaderboard** — burn ranked by protocol mechanism (7d/30d/all time), plus the one app with its own attribution (Filecoin Onchain Cloud)
 
-Headline numbers and recent data are fetched live on every page load from the [Starboard Network Health API](https://networkhealth.starboard.ventures) (price from CoinGecko). Monthly history before the current period is embedded in `seed.json`, built by chunked pulls of the same API (cumulative past data is immutable, so it does not go stale). The FOC row comes from the FOC contract index (FilecoinPay + PDPVerifier events), dated on the page.
+Data is sourced from the [Filecoin Data Portal](https://filecoindataportal.xyz) `daily_network_metrics.parquet` dataset. A GitHub Actions workflow runs `EconomyFlows/build_seed.py` daily at 07:00 UTC and commits the refreshed `EconomyFlows/seed.json`; the page reads only that file plus a live CoinGecko price. One exception: the burn-by-mechanism split comes from the [Starboard Network Health API](https://networkhealth.starboard.ventures), because the portal's daily metrics do not itemize burn by mechanism reliably. The FOC row comes from the FOC contract index (FilecoinPay + PDPVerifier events), dated on the page. To trigger manually: Actions > Update Economy Flows Data > Run workflow. To run locally: `pip install duckdb && python EconomyFlows/build_seed.py`
 
 ### [L1 Health Metrics](https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html)
 
