@@ -4,6 +4,19 @@ A collection of Filecoin metrics dashboards. All dashboards are self-contained H
 
 ## Dashboards
 
+### [Filecoin Economy Flows](https://irenegia.github.io/filecoin-metrics/)
+
+**Live dashboard:** <https://irenegia.github.io/filecoin-metrics/>
+
+An ultrasound.money-style live view of the FIL token economy, supply lens only:
+
+- **Supply** — circulating FIL since mainnet launch, plus the live accounting line (mined + vested − locked − burned = circulating)
+- **Issuance and burn** — FIL minted and destroyed per day
+- **Issuance offset** — burn as a share of issuance (1.0x = supply-neutral), trailing 365d/30d and monthly
+- **Burn leaderboard** — burn ranked by protocol mechanism (7d/30d/all time), plus the one app with its own attribution (Filecoin Onchain Cloud)
+
+Headline numbers and recent data are fetched live on every page load from the [Starboard Network Health API](https://networkhealth.starboard.ventures) (price from CoinGecko). Monthly history before the current period is embedded in `seed.json`, built by chunked pulls of the same API (cumulative past data is immutable, so it does not go stale). The FOC row comes from the FOC contract index (FilecoinPay + PDPVerifier events), dated on the page.
+
 ### [L1 Health Metrics](https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html)
 
 **Live dashboard:** <https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html>

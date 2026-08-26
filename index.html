@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filecoin Economy Flows</title>
+<meta name="description" content="Live view of FIL supply, issuance and burn. Ultrasound.money style, for Filecoin.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#128293;</text></svg>">
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --c-supply: #3987e5;
+    --c-iss: #199e70;
+    --c-burn: #d95926;
+    --c-offset: #9085e9;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page); color: var(--ink-2);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 28px 16px 60px;
+  }
+  main { max-width: 1060px; margin: 0 auto; }
+  a { color: var(--c-supply); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { max-width: 1060px; margin: 0 auto 26px; display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+  h1 { color: var(--ink); font-size: 26px; letter-spacing: -0.3px; }
+  .tagline { color: var(--ink-muted); font-size: 14px; }
+  .chip { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 14px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+  .chip b { color: var(--ink); font-weight: 600; }
+  #stamp { font-size: 12px; color: var(--ink-muted); }
+
+  section { margin-bottom: 34px; }
+  h2 { color: var(--ink); font-size: 17px; margin-bottom: 4px; }
+  .sub { color: var(--ink-muted); font-size: 13px; margin-bottom: 12px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .lbl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); }
+  .tile .val { font-size: 26px; color: var(--ink); font-weight: 650; margin: 2px 0; }
+  .tile .d { font-size: 12.5px; color: var(--ink-muted); }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 10px; }
+  .card.wide { grid-column: 1 / -1; }
+  .chart-title { font-size: 13px; color: var(--ink); font-weight: 600; }
+  .chartbox svg { width: 100%; height: auto; display: block; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .src { font-size: 11.5px; color: var(--ink-muted); margin-top: 6px; }
+  .note { font-size: 12.5px; color: var(--ink-muted); margin-top: 10px; }
+
+  .strip { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; font-variant-numeric: tabular-nums; margin-top: 8px; }
+  .strip b { color: var(--ink); font-weight: 600; }
+  .strip .plus { color: var(--c-iss); } .strip .minus { color: var(--c-burn); }
+
+  .lb-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
+  .lb-toggle button { background: var(--surface); color: var(--ink-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+  .lb-toggle button[aria-pressed="true"] { background: var(--c-burn); color: #fff; border-color: var(--c-burn); }
+  .lb-row { display: grid; grid-template-columns: 230px 1fr 110px; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--grid); font-size: 13.5px; }
+  .lb-row:last-child { border-bottom: 0; }
+  .lb-row .nm { color: var(--ink-2); }
+  .lb-row .bar { display: block; height: 12px; border-radius: 3px; background: var(--c-burn); min-width: 2px; }
+  .lb-row .v { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .lb-row.foc { border-top: 1px solid var(--axis); margin-top: 4px; padding-top: 11px; }
+  .lb-row.foc .nm { color: var(--ink); }
+  .lb-row.foc .bar { background: var(--c-offset); }
+  .tag { display: inline-block; font-size: 10.5px; color: var(--ink-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+
+  details { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 34px; }
+  summary { cursor: pointer; color: var(--ink); font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 10px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-muted); font-weight: 500; }
+  .tablewrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+
+  footer { border-top: 1px solid var(--axis); padding-top: 16px; font-size: 13px; color: var(--ink-muted); }
+  footer h3 { color: var(--ink-2); font-size: 13px; margin: 12px 0 4px; }
+  footer ul { padding-left: 18px; }
+  footer li { margin-bottom: 3px; }
+
+  #tip { position: fixed; display: none; background: #232322; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; pointer-events: none; z-index: 10; max-width: 260px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+  #tip .t { color: var(--ink); font-weight: 600; margin-bottom: 3px; }
+  #tip .row { display: flex; align-items: center; gap: 6px; }
+  #tip .lk { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  #tip .n { color: var(--ink-2); }
+  #tip .v { color: var(--ink); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  .err { background: var(--surface); border: 1px solid var(--c-burn); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 20px; display: none; }
+
+  @media (max-width: 820px) {
+    .tiles { grid-template-columns: 1fr 1fr; }
+    .cards { grid-template-columns: 1fr; }
+    .lb-row { grid-template-columns: 150px 1fr 90px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Filecoin Economy Flows</h1>
+    <div class="tagline">FIL supply, issuance and burn. Live, from public APIs.</div>
+  </div>
+  <div style="text-align:right">
+    <span class="chip">FIL <b id="price">&hellip;</b></span>
+    <div id="stamp">loading&hellip;</div>
+  </div>
+</header>
+<main>
+  <div class="err" id="err"></div>
+
+  <section aria-label="Headline numbers">
+    <div class="tiles" id="tiles"></div>
+    <div class="src">Source, fetched on load: <a href="https://networkhealth.starboard.ventures" target="_blank" rel="noopener">Starboard Network Health API</a> (daily, cumulative counters) &middot; price: CoinGecko.</div>
+  </section>
+
+  <section>
+    <h2>Supply</h2>
+    <div class="sub">Circulating FIL, protocol definition, since mainnet launch (Oct 2020).</div>
+    <div class="cards">
+      <div class="card wide">
+        <div class="chart-title">Circulating supply, FIL</div>
+        <div class="chartbox" id="ch-supply"></div>
+        <div class="strip" id="strip"></div>
+        <div class="src">Monthly history: embedded snapshot of the same Starboard series (immutable past). Latest point and the accounting line: live. Vested includes mining-reserve disbursements.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Issuance and burn</h2>
+    <div class="sub">What the protocol mints per day (block rewards) and what it destroys per day (fees and penalties). Monthly averages.</div>
+    <div class="cards">
+      <div class="card">
+        <div class="chart-title">Issuance, FIL per day</div>
+        <div class="chartbox" id="ch-iss"></div>
+        <div class="src">Block rewards minted. Vesting also adds to circulating supply but is not issuance; see the accounting line above.</div>
+      </div>
+      <div class="card">
+        <div class="chart-title">Burn, FIL per day</div>
+        <div class="chartbox" id="ch-burn"></div>
+        <div class="src">All burn: gas base fees, overestimation, batch fees, SP penalties. The 2020-21 peak is onboarding gas; today most burn is SP penalties.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Issuance offset</h2>
+    <div class="sub">Burn divided by issuance. 1.0x means supply-neutral: the network destroys as much FIL as it mints. This is ultrasound.money's headline ratio, computed for Filecoin.</div>
+    <div class="tiles" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 12px;" id="offset-tiles"></div>
+    <div class="cards">
+      <div class="card wide">
+        <div class="chart-title">Issuance offset by month, burn as % of issuance</div>
+        <div class="chartbox" id="ch-offset"></div>
+        <div class="src">Computed from the two series above: monthly burn / monthly issuance.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Burn leaderboard</h2>
+    <div class="sub">Who burns FIL. Filecoin has no per-app burn attribution yet, so unlike ultrasound.money this board ranks burn by protocol mechanism, network wide. The one app with its own attribution today is Filecoin Onchain Cloud, from its own indexer.</div>
+    <div class="card wide">
+      <div class="lb-toggle" role="group" aria-label="Time window">
+        <button data-w="7">7d</button><button data-w="30" aria-pressed="true">30d</button><button data-w="all">all time</button>
+      </div>
+      <div id="lb"></div>
+      <div class="note" id="lb-note"></div>
+    </div>
+  </section>
+
+  <details>
+    <summary>Data table (monthly)</summary>
+    <div class="tablewrap"><table id="tbl"></table></div>
+  </details>
+
+  <footer>
+    <h3>Method</h3>
+    <ul>
+      <li><b>Live on every load:</b> latest supply row, last 90 days of daily data, a 365-days-ago reference row, and the burn breakdown, all from the <a href="https://networkhealth.starboard.ventures" target="_blank" rel="noopener">Starboard Network Health API</a> (endpoints <code>/v2/v2/circulating_supply/circulating_supply</code> and <code>/v2/v2/gas/daily_network_fee_breakdown</code>, window capped at 90 days per request). FIL price from CoinGecko.</li>
+      <li><b>Embedded history:</b> monthly values before the current period ship in <a href="seed.json">seed.json</a>, built 2026-08-26 by chunked pulls of the same two Starboard endpoints from 2020-10-15. Cumulative past data is immutable, so this never goes stale; the live tail is appended on load.</li>
+      <li><b>Filecoin Onchain Cloud row:</b> FOC contract index (FilecoinPay + PDPVerifier events, <a href="https://github.com/FilOzone/filecoin-pay" target="_blank" rel="noopener">FilOzone/filecoin-pay</a>), as of 2026-08-26: 63.30 FIL burned via 49 fee-auction claims plus 1.44 FIL of PDP proof fees, plus negligible direct FIL-rail fees.</li>
+      <li><b>Definitions:</b> circulating supply per the protocol definition. Issuance = mined block rewards. Burn = base fees + gas overestimation + batch fees + SP penalties; miner tips are excluded (paid to block producers, not burned). Deliberately out of scope: business-lens metrics such as the revenue coverage ratio (burn vs block rewards + public goods funding); those live in the <a href="https://irenegia.github.io/filecoin-pay-fee-dial/flows.html" target="_blank" rel="noopener">FIL Flowmeter</a>.</li>
+    </ul>
+    <h3>Related</h3>
+    <ul>
+      <li><a href="https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html">L1 Health Metrics</a> (this repo) &middot; <a href="https://irenegia.github.io/filecoin-pay-fee-dial/flows.html" target="_blank" rel="noopener">FIL Flowmeter</a> &middot; <a href="https://irenegia.github.io/filecoin-pay-fee-dial/" target="_blank" rel="noopener">Fee Dial</a> &middot; <a href="https://ultrasound.money" target="_blank" rel="noopener">ultrasound.money</a> (the inspiration)</li>
+      <li>Page source: <a href="https://github.com/irenegia/filecoin-metrics" target="_blank" rel="noopener">github.com/irenegia/filecoin-metrics</a></li>
+    </ul>
+  </footer>
+</main>
+<div id="tip" role="tooltip"></div>
+<noscript><p>This page needs JavaScript: it fetches live Filecoin supply data on load.</p></noscript>
+<script>
+"use strict";
+/* ---------- constants ---------- */
+const SB = "https://networkhealth.starboard.ventures/v2";
+const FOC = { fil: 64.73, auctions: 63.30, claims: 49, proof: 1.44, asOf: "2026-08-26" };
+const SEED_BUILT = "2026-08-26";
+
+/* ---------- formatting ---------- */
+const fmtN = v => { const a = Math.abs(v);
+  return a >= 1e9 ? (v/1e9).toFixed(2) + "B" : a >= 1e6 ? (v/1e6).toFixed(1) + "M"
+    : a >= 1e3 ? (v/1e3).toFixed(1) + "K" : a >= 10 ? v.toFixed(0) : v.toFixed(2); };
+const fmtFil = v => fmtN(v) + " FIL";
+const fmtAx = v => { const a = Math.abs(v);
+  return a >= 1e9 ? (v/1e9).toFixed(1) + "B" : a >= 1e6 ? (v/1e6).toFixed(0) + "M"
+    : a >= 1e3 ? (v/1e3).toFixed(0) + "K" : v.toFixed(0); };
+const fmtPct1 = v => v.toFixed(1) + "%";
+const monthLabel = m => { const [y, mm] = m.split("-");
+  return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+mm-1] + " " + y.slice(2); };
+const iso = d => d.toISOString().slice(0, 10);
+
+/* ---------- tooltip ---------- */
+const tip = document.getElementById("tip");
+function showTip(x, y, title, rows) {
+  tip.innerHTML = "";
+  const t = document.createElement("div"); t.className = "t"; t.textContent = title; tip.appendChild(t);
+  for (const r of rows) {
+    const row = document.createElement("div"); row.className = "row";
+    const lk = document.createElement("span"); lk.className = "lk"; lk.style.background = r.color;
+    const n = document.createElement("span"); n.className = "n"; n.textContent = r.name;
+    const v = document.createElement("span"); v.className = "v"; v.textContent = r.value;
+    row.append(lk, n, v); tip.appendChild(row);
+  }
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(x + 14, innerWidth - w - 8) + "px";
+  tip.style.top = Math.max(8, Math.min(y - h - 12, innerHeight - h - 8)) + "px";
+}
+const hideTip = () => tip.style.display = "none";
+
+/* ---------- svg line chart (crosshair + tooltip) ---------- */
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, style) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (style) e.setAttribute("style", style);
+  return e;
+}
+function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v || 1)));
+  for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m*p >= v) return m*p; return 10*p; }
+function lineChart(boxId, labels, vals, color, yfmt, vfmt, opts = {}) {
+  const box = document.getElementById(boxId); box.innerHTML = "";
+  const W = 520, HGT = opts.h || 220;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${HGT}`, role: "img", "aria-label": opts.aria || "" });
+  box.appendChild(svg);
+  const x0 = 52, x1 = W - 58, y0 = HGT - 24, y1 = 14;
+  const ymax = niceMax(Math.max(...vals) * 1.05);
+  for (let i = 0; i <= 3; i++) {
+    const v = ymax * i / 3, y = y0 - (y0 - y1) * i / 3;
+    if (i > 0) svg.appendChild(el("line", { x1: x0, x2: x1, y1: y, y2: y }, "stroke:var(--grid);stroke-width:1"));
+    const t = el("text", { x: x0 - 6, y: y + 4, "text-anchor": "end" }, "fill:var(--ink-muted)");
+    t.textContent = yfmt(v); svg.appendChild(t);
+  }
+  svg.appendChild(el("line", { x1: x0, x2: x1, y1: y0, y2: y0 }, "stroke:var(--axis);stroke-width:1"));
+  const n = labels.length;
+  labels.forEach((m, i) => {
+    if (i % 12 !== 2 && i !== n - 1) return;
+    if (i !== n - 1 && n - 1 - i < 6) return;
+    const x = x0 + (x1 - x0) * (i + 0.5) / n;
+    const t = el("text", { x, y: y0 + 16, "text-anchor": "middle" }, "fill:var(--ink-muted)");
+    t.textContent = monthLabel(m); svg.appendChild(t);
+  });
+  const X = i => x0 + (x1 - x0) * (i + 0.5) / n;
+  const Y = v => y0 - (y0 - y1) * v / ymax;
+  const d = vals.map((v, i) => (i ? "L" : "M") + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join("");
+  svg.appendChild(el("path", { d: d + `L${X(n-1).toFixed(1)},${y0}L${X(0).toFixed(1)},${y0}z` }, `fill:var(--${color});opacity:0.08`));
+  svg.appendChild(el("path", { d, fill: "none" }, `stroke:var(--${color});stroke-width:2;stroke-linejoin:round;stroke-linecap:round`));
+  svg.appendChild(el("circle", { cx: X(n-1), cy: Y(vals[n-1]), r: 4 }, `fill:var(--${color});stroke:var(--surface);stroke-width:2`));
+  const lt = el("text", { x: X(n-1) + 7, y: Y(vals[n-1]) + 4 }, "fill:var(--ink-2)");
+  lt.textContent = vfmt(vals[n-1]); svg.appendChild(lt);
+  const cross = el("line", { y1, y2: y0 }, "stroke:var(--axis);stroke-width:1;display:none");
+  svg.appendChild(cross);
+  const hit = el("rect", { x: x0, y: y1, width: x1 - x0, height: y0 - y1, fill: "transparent" });
+  svg.appendChild(hit);
+  hit.addEventListener("pointermove", e => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - x0) / (x1 - x0) * n - 0.5)));
+    cross.setAttribute("x1", X(i)); cross.setAttribute("x2", X(i)); cross.style.display = "block";
+    const name = (opts.mtdIndex === i) ? "month to date" : "monthly";
+    showTip(e.clientX, e.clientY, monthLabel(labels[i]),
+      [{ color: getComputedStyle(document.documentElement).getPropertyValue("--" + color), name, value: vfmt(vals[i]) }]);
+  });
+  hit.addEventListener("pointerleave", () => { cross.style.display = "none"; hideTip(); });
+}
+
+/* ---------- data ---------- */
+async function j(url, timeoutMs = 12000) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), timeoutMs);
+  try { const r = await fetch(url, { signal: c.signal }); if (!r.ok) throw new Error(r.status); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+const sbData = p => p && p.code === 0 && Array.isArray(p.data) ? p.data : null;
+function monthDays(m) {
+  if (m === "2020-10") return 17; /* mainnet launched Oct 15 2020 */
+  const [y, mm] = m.split("-").map(Number);
+  return new Date(Date.UTC(y, mm, 0)).getUTCDate();
+}
+
+async function main() {
+  const now = new Date();
+  const today = iso(now);
+  const d88 = iso(new Date(now - 88 * 864e5)); /* API caps windows at 90 days */
+  const y0 = iso(new Date(now - 367 * 864e5)), y1 = iso(new Date(now - 364 * 864e5));
+  const [seedR, sumR, tailR, yearR, gasR, priceR] = await Promise.allSettled([
+    j("./seed.json"),
+    j(`${SB}/v1/network_core/circulating-supply/circulating_supply`),
+    j(`${SB}/v2/circulating_supply/circulating_supply?start_date=${d88}&end_date=${today}`),
+    j(`${SB}/v2/circulating_supply/circulating_supply?start_date=${y0}&end_date=${y1}`),
+    j(`${SB}/v2/gas/daily_network_fee_breakdown?start_date=${d88}&end_date=${today}`),
+    j("https://api.coingecko.com/api/v3/simple/price?ids=filecoin&vs_currencies=usd")
+  ]);
+  if (seedR.status !== "fulfilled") {
+    const e = document.getElementById("err");
+    e.style.display = "block"; e.textContent = "Could not load seed.json, so the history charts are unavailable. Live headline numbers may still work.";
+  }
+  const seed = seedR.status === "fulfilled" ? seedR.value : { supply: [], gas: [] };
+  const sum = sumR.status === "fulfilled" ? sbData(sumR.value) : null;
+  const tail = tailR.status === "fulfilled" ? sbData(tailR.value) : null;
+  const year = yearR.status === "fulfilled" ? sbData(yearR.value) : null;
+  const gas = gasR.status === "fulfilled" ? sbData(gasR.value) : null;
+  const live = !!(sum && sum.length);
+
+  /* latest cumulative row */
+  const lastSeed = seed.supply[seed.supply.length - 1];
+  const latest = live ? sum[sum.length - 1] : (tail && tail.length ? tail[tail.length - 1] : null);
+  const L = latest || (lastSeed ? { stat_date: lastSeed[0] + "-31", circulating_fil: lastSeed[1], mined_fil: lastSeed[2],
+    vested_fil: lastSeed[3], reserve_disbursed_fil: 0, locked_fil: lastSeed[4], burnt_fil: lastSeed[5] } : null);
+  const asOf = L ? String(L.stat_date).slice(0, 10) : "?";
+  document.getElementById("stamp").textContent = latest
+    ? "live · data through " + asOf : "live fetch failed · snapshot through " + SEED_BUILT;
+
+  if (priceR.status === "fulfilled" && priceR.value.filecoin)
+    document.getElementById("price").textContent = "$" + priceR.value.filecoin.usd.toFixed(3);
+  else document.getElementById("price").textContent = "n/a";
+
+  /* trailing-365d diffs */
+  let growthYr = null, off365 = null;
+  if (L && year && year.length) {
+    const Yr = year[year.length - 1];
+    growthYr = (L.circulating_fil / Yr.circulating_fil - 1) * 100;
+    off365 = (L.burnt_fil - Yr.burnt_fil) / (L.mined_fil - Yr.mined_fil);
+  }
+  /* trailing-30d from the daily tail */
+  let off30 = null;
+  if (tail && tail.length > 31) {
+    const a = tail[tail.length - 1], b = tail[tail.length - 31];
+    off30 = (a.burnt_fil - b.burnt_fil) / (a.mined_fil - b.mined_fil);
+  }
+
+  /* hero tiles */
+  const tiles = [
+    { lbl: "Circulating supply", val: L ? fmtN(L.circulating_fil) + " FIL" : "n/a",
+      d: latest && latest.circulating_fil_increase != null ? (latest.circulating_fil_increase >= 0 ? "+" : "") + fmtN(latest.circulating_fil_increase) + " FIL past 24h" : "as of " + asOf },
+    { lbl: "Supply growth", val: growthYr != null ? (growthYr >= 0 ? "+" : "") + growthYr.toFixed(1) + "%/yr" : "n/a",
+      d: "trailing 365d (ETH: about +1%/yr)" },
+    { lbl: "Issuance, 24h", val: latest && latest.mined_fil_increase != null ? fmtN(latest.mined_fil_increase) + " FIL" : "n/a",
+      d: "block rewards minted" },
+    { lbl: "Burn, 24h", val: latest && latest.burnt_fil_increase != null ? fmtN(latest.burnt_fil_increase) + " FIL" : "n/a",
+      d: L ? fmtN(L.burnt_fil) + " FIL burned all time" : "" },
+  ];
+  document.getElementById("tiles").innerHTML = tiles.map(t =>
+    `<div class="tile"><div class="lbl">${t.lbl}</div><div class="val">${t.val}</div><div class="d">${t.d}</div></div>`).join("");
+
+  /* supply accounting strip */
+  if (L) document.getElementById("strip").innerHTML =
+    `<span><span class="plus">+</span> mined <b>${fmtN(L.mined_fil)}</b></span>` +
+    `<span><span class="plus">+</span> vested <b>${fmtN(L.vested_fil + (L.reserve_disbursed_fil || 0))}</b></span>` +
+    `<span><span class="minus">&minus;</span> locked <b>${fmtN(L.locked_fil)}</b></span>` +
+    `<span><span class="minus">&minus;</span> burned <b>${fmtN(L.burnt_fil)}</b></span>` +
+    `<span>= circulating <b>${fmtN(L.circulating_fil)} FIL</b></span>`;
+
+  /* monthly series from seed + live month-to-date point */
+  const S = seed.supply;
+  if (S.length > 1) {
+    const labels = S.map(r => r[0]);
+    const circ = S.map(r => r[1]);
+    const issD = [], burnD = [], offM = [], dLabels = [];
+    for (let i = 1; i < S.length; i++) {
+      const d = monthDays(S[i][0]);
+      dLabels.push(S[i][0]);
+      issD.push((S[i][2] - S[i-1][2]) / d);
+      burnD.push((S[i][5] - S[i-1][5]) / d);
+      offM.push((S[i][5] - S[i-1][5]) / (S[i][2] - S[i-1][2]) * 100);
+    }
+    let mtdIndex;
+    const curM = today.slice(0, 7);
+    if (latest && tail && String(latest.stat_date).slice(0, 7) === curM && labels[labels.length-1] !== curM) {
+      const eom = tail.find(r => String(r.stat_date).slice(0, 10) === labels[labels.length-1] + "-" + String(monthDays(labels[labels.length-1])).padStart(2, "0"));
+      const base = eom || { mined_fil: S[S.length-1][2], burnt_fil: S[S.length-1][5] };
+      const days = +String(latest.stat_date).slice(8, 10);
+      labels.push(curM); circ.push(latest.circulating_fil);
+      dLabels.push(curM);
+      issD.push((latest.mined_fil - base.mined_fil) / days);
+      burnD.push((latest.burnt_fil - base.burnt_fil) / days);
+      offM.push((latest.burnt_fil - base.burnt_fil) / (latest.mined_fil - base.mined_fil) * 100);
+      mtdIndex = dLabels.length - 1;
+    }
+    lineChart("ch-supply", labels, circ, "c-supply", fmtAx, fmtN, { h: 240, aria: "Circulating FIL supply by month", mtdIndex: mtdIndex == null ? -1 : mtdIndex + 1 });
+    lineChart("ch-iss", dLabels, issD, "c-iss", fmtAx, v => fmtN(v) + "/d", { aria: "FIL issued per day, monthly average", mtdIndex });
+    lineChart("ch-burn", dLabels, burnD, "c-burn", fmtAx, v => fmtN(v) + "/d", { aria: "FIL burned per day, monthly average", mtdIndex });
+    lineChart("ch-offset", dLabels, offM, "c-offset", v => v.toFixed(0) + "%", fmtPct1, { aria: "Monthly burn as percent of issuance", mtdIndex });
+
+    /* data table */
+    const rows = dLabels.map((m, i) =>
+      `<tr><td>${m}</td><td>${Math.round(circ[i+1] ?? circ[i]).toLocaleString("en-US")}</td><td>${Math.round(issD[i]).toLocaleString("en-US")}</td><td>${Math.round(burnD[i]).toLocaleString("en-US")}</td><td>${offM[i].toFixed(1)}%</td></tr>`).reverse().join("");
+    document.getElementById("tbl").innerHTML =
+      "<tr><th>Month</th><th>Circulating (FIL)</th><th>Issuance (FIL/day)</th><th>Burn (FIL/day)</th><th>Offset</th></tr>" + rows;
+  }
+
+  /* offset tiles */
+  const ot = [
+    { lbl: "Issuance offset, 365d", val: off365 != null ? (off365 * 100).toFixed(1) + "%" : "n/a",
+      d: off365 != null ? "Filecoin burns " + (off365 * 100).toFixed(1) + "% of what it issues (= " + off365.toFixed(2) + "x)" : "needs the live 365d reference" },
+    { lbl: "Issuance offset, 30d", val: off30 != null ? (off30 * 100).toFixed(1) + "%" : "n/a",
+      d: off30 != null ? "= " + off30.toFixed(2) + "x of issuance" : "needs the live 90d window" },
+  ];
+  document.getElementById("offset-tiles").innerHTML = ot.map(t =>
+    `<div class="tile"><div class="lbl">${t.lbl}</div><div class="val">${t.val}</div><div class="d">${t.d}</div></div>`).join("");
+
+  /* leaderboard */
+  const G = seed.gas;
+  const sumTypes = rows => rows.reduce((a, r) => [a[0]+r.base_fee_burn, a[1]+r.overestimation_burn,
+    a[2]+r.precommit_batch_fee_burn+r.provecommit_batch_fee_burn, a[3]+r.penalty_fee_burn], [0,0,0,0]);
+  const NAMES = ["Gas base fees", "Gas overestimation fees", "Sector batch fees", "SP penalties (faults, terminations)"];
+  function lbData(w) {
+    if (w === "all") {
+      const a = [0,0,0,0];
+      for (const r of G) { a[0]+=r[1]; a[1]+=r[2]; a[2]+=r[3]; a[3]+=r[4]; }
+      if (gas) { const t = sumTypes(gas.filter(r => String(r.stat_date).slice(0, 7) > G[G.length-1][0]));
+        for (let i = 0; i < 4; i++) a[i] += t[i]; }
+      return a;
+    }
+    if (!gas) return null;
+    return sumTypes(gas.slice(-w));
+  }
+  function renderLb(w) {
+    const a = lbData(w);
+    const lb = document.getElementById("lb");
+    if (!a) { lb.innerHTML = '<div class="note">Live burn breakdown unavailable (fetch failed). Try the all-time view.</div>'; return; }
+    const items = [3,0,1,2].map(i => ({ name: NAMES[i], v: a[i] })).sort((x, y) => y.v - x.v);
+    const mx = Math.max(...items.map(i => i.v), FOC.fil);
+    lb.innerHTML = items.map(i =>
+      `<div class="lb-row"><span class="nm">${i.name}</span><span><span class="bar" style="width:${i.v > 0 ? Math.max(1, i.v/mx*100) : 0}%"></span></span><span class="v">${fmtFil(i.v)}</span></div>`).join("") +
+      `<div class="lb-row foc"><span class="nm">Filecoin Onchain Cloud<span class="tag">app &middot; all time</span></span><span><span class="bar" style="width:${Math.max(0.4, FOC.fil/mx*100)}%"></span></span><span class="v">${FOC.fil.toFixed(1)} FIL</span></div>`;
+    const covered = w === "all" && L ? ", and cover " + (a.reduce((s, v) => s + v, 0) / L.burnt_fil * 100).toFixed(0) + "% of all FIL ever burned; the rest is other protocol burns outside this breakdown" : "";
+    document.getElementById("lb-note").textContent =
+      "Mechanism rows are network wide" + covered + ". Miner tips are excluded (not burned). " +
+      "The FOC row is payment-fee burn attributed to one app: " + FOC.auctions.toFixed(1) + " FIL via " + FOC.claims +
+      " fee-auction claims plus " + FOC.proof.toFixed(1) + " FIL of PDP proof fees, as of " + FOC.asOf + " (FOC index, not live).";
+  }
+  document.querySelectorAll(".lb-toggle button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".lb-toggle button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    renderLb(b.dataset.w === "all" ? "all" : +b.dataset.w);
+  }));
+  renderLb(30);
+}
+main().catch(e => {
+  const el = document.getElementById("err");
+  el.style.display = "block";
+  el.textContent = "Something went wrong rendering the page: " + e.message;
+});
+</script>
+</body>
+</html>
