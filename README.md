@@ -4,9 +4,9 @@ A collection of Filecoin metrics dashboards. All dashboards are self-contained H
 
 ## Dashboards
 
-### [Filecoin Economy Flows](https://irenegia.github.io/filecoin-metrics/)
+### [Filecoin Economy Flows](https://irenegia.github.io/filecoin-metrics/EconomyFlows/)
 
-**Live dashboard:** <https://irenegia.github.io/filecoin-metrics/>
+**Live dashboard:** <https://irenegia.github.io/filecoin-metrics/EconomyFlows/>
 
 An ultrasound.money-style live view of the FIL token economy, supply lens only:
 
