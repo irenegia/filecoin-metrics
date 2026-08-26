@@ -247,7 +247,8 @@ function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v || 1)));
   for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m*p >= v) return m*p; return 10*p; }
 function lineChart(boxId, labels, vals, color, yfmt, vfmt, opts = {}) {
   const box = document.getElementById(boxId); box.innerHTML = "";
-  const W = 520, HGT = opts.h || 220;
+  /* viewBox width = real container width, so marks and text render 1:1 instead of scaling up in wide cards */
+  const W = Math.max(320, Math.round(box.clientWidth) || 520), HGT = opts.h || 220;
   const svg = el("svg", { viewBox: `0 0 ${W} ${HGT}`, role: "img", "aria-label": opts.aria || "" });
   box.appendChild(svg);
   const x0 = 52, x1 = W - 58, y0 = HGT - 24, y1 = 14;
@@ -260,8 +261,9 @@ function lineChart(boxId, labels, vals, color, yfmt, vfmt, opts = {}) {
   }
   svg.appendChild(el("line", { x1: x0, x2: x1, y1: y0, y2: y0 }, "stroke:var(--axis);stroke-width:1"));
   const n = labels.length;
+  const every = W > 700 ? 6 : 12;
   labels.forEach((m, i) => {
-    if (i % 12 !== 2 && i !== n - 1) return;
+    if (i % every !== 2 && i !== n - 1) return;
     if (i !== n - 1 && n - 1 - i < 6) return;
     const x = x0 + (x1 - x0) * (i + 0.5) / n;
     const t = el("text", { x, y: y0 + 16, "text-anchor": "middle" }, "fill:var(--ink-muted)");
