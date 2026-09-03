@@ -8,8 +8,9 @@ A collection of Filecoin metrics dashboards. All dashboards are self-contained H
 
 **Live dashboard:** <https://irenegia.github.io/filecoin-metrics/EconomyFlows/>
 
-An ultrasound.money-style live view of the FIL token economy, supply lens only:
+An ultrasound.money-inspired live view of the FIL token economy, redesigned with a Filecoin-native dark dashboard UX:
 
+- **Hero board** — circulating FIL, daily supply change, total burn/issuance, and annualized flow gauges
 - **Supply** — circulating FIL since mainnet launch, plus the live accounting line (mined + vested − locked − burned = circulating)
 - **Issuance and burn** — FIL minted and destroyed per day
 - **Issuance offset** — burn as a share of issuance (1.0x = supply-neutral), trailing 365d/30d and monthly
