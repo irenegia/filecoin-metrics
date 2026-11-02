@@ -16,11 +16,13 @@ Usage:
 
 Data sources (all from https://data.filecoindataportal.xyz):
     - daily_network_metrics.parquet       (~530 KB)
-    - daily_storage_providers_metrics.parquet (~94 MB — cached locally)
-    - storage_providers.parquet           (~900 KB)
+    - daily_miner_metrics.parquet         (cached locally)
+
+Owners come from Filecoin RPC (StateMinerInfo) and are saved in miner_owners.csv.
 """
 
 import argparse, csv, json, os, sys, time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -32,9 +34,10 @@ except ImportError:
 # ── Config ──────────────────────────────────────────────────────────
 BASE_URL   = "https://data.filecoindataportal.xyz"
 NETWORK    = f"{BASE_URL}/daily_network_metrics.parquet"
-SP_DAILY   = f"{BASE_URL}/daily_storage_providers_metrics.parquet"
-SP_STATIC  = f"{BASE_URL}/storage_providers.parquet"
+SP_DAILY   = f"{BASE_URL}/daily_miner_metrics.parquet"
+RPC_URL    = "https://api.node.glif.io/rpc/v1"
 CACHE_DIR  = Path(__file__).parent / ".cache"
+OWNERS_CSV = Path(__file__).parent / "miner_owners.csv"
 
 # ── Helpers ─────────────────────────────────────────────────────────
 def log(msg):
@@ -60,6 +63,45 @@ def cache_parquet(url: str, name: str, max_age_hours: int = 12) -> str:
             f.write(chunk)
     log(f"  Saved {local.stat().st_size / 1e6:.1f} MB → {local}")
     return str(local)
+
+def rpc_owner(miner: str):
+    """Return the miner's current owner from Filecoin RPC, or None on failure."""
+    import urllib.request
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "Filecoin.StateMinerInfo",
+                       "params": [miner, None]}).encode()
+    req = urllib.request.Request(RPC_URL, body, {"Content-Type": "application/json",
+                                                 "User-Agent": "FilecoinDashboard/1.0"})
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.load(resp)["result"]["Owner"]
+        except Exception:
+            time.sleep(2 ** attempt)
+    return None
+
+def refresh_owners(con, sp_daily_path: str) -> str:
+    """Update miner_owners.csv for miners with recent rewards or no saved owner."""
+    with open(OWNERS_CSV, newline="") as f:
+        owners = {r["miner_id"]: r["owner_id"] for r in csv.DictReader(f)}
+    since = (datetime.utcnow() - timedelta(days=60)).date()
+    rows = con.sql(f"""
+        SELECT miner_id, MAX(date) >= DATE '{since}'
+        FROM '{sp_daily_path}'
+        WHERE block_rewards_fil > 0
+        GROUP BY miner_id
+    """).fetchall()
+    todo = [m for m, recent in rows if recent or m not in owners]
+    log(f"  Looking up {len(todo)} owners …")
+    with ThreadPoolExecutor(4) as pool:
+        found = list(pool.map(rpc_owner, todo))
+    owners.update({m: o for m, o in zip(todo, found) if o})
+    with open(OWNERS_CSV, "w", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["miner_id", "owner_id"])
+        w.writerows(sorted(owners.items()))
+    log(f"  {found.count(None)} lookups failed; "
+        f"{sum(m not in owners for m, _ in rows)} miners count as their own owner")
+    return str(OWNERS_CSV)
 
 def arr(rows, col=0):
     """Extract column from DuckDB result as a Python list."""
@@ -118,8 +160,9 @@ def fetch_all(con, attack_cost_csv=None):
     net_path = NETWORK  # small file, query remote directly
 
     log("Caching large SP daily file …")
-    sp_daily_path = cache_parquet(SP_DAILY, "daily_storage_providers_metrics.parquet")
-    sp_static_path = cache_parquet(SP_STATIC, "storage_providers.parquet")
+    sp_daily_path = cache_parquet(SP_DAILY, "daily_miner_metrics.parquet")
+    log("Refreshing miner owners …")
+    owners_path = refresh_owners(con, sp_daily_path)
 
     data = {}
 
@@ -127,17 +170,18 @@ def fetch_all(con, attack_cost_csv=None):
     log("Computing reward concentration (30d rolling avg, weekly samples) …")
     rows = con.sql(f"""
         WITH daily_owner AS (
-            SELECT d.date, s.owner_id, SUM(d.block_rewards_fil) AS rewards
+            SELECT d.date, COALESCE(s.owner_id, d.miner_id) AS owner_id,
+                   SUM(d.block_rewards_fil) AS rewards
             FROM '{sp_daily_path}' d
-            JOIN '{sp_static_path}' s ON d.storage_provider_id = s.storage_provider_id
-            GROUP BY d.date, s.owner_id
+            LEFT JOIN '{owners_path}' s ON d.miner_id = s.miner_id
+            WHERE d.block_rewards_fil > 0
+            GROUP BY 1, 2
         ),
         daily_shares AS (
             SELECT date,
                 SUM(CASE WHEN rnk =  1 THEN pct ELSE 0 END) AS top1,
                 SUM(CASE WHEN rnk <= 5 THEN pct ELSE 0 END) AS top5,
-                SUM(CASE WHEN rnk <=10 THEN pct ELSE 0 END) AS top10,
-                COUNT(*) AS owner_count
+                SUM(CASE WHEN rnk <=10 THEN pct ELSE 0 END) AS top10
             FROM (
                 SELECT date, owner_id,
                     100.0 * rewards / SUM(rewards) OVER (PARTITION BY date) AS pct,
@@ -150,26 +194,28 @@ def fetch_all(con, attack_cost_csv=None):
             SELECT date,
                 AVG(top1)  OVER w AS top1_30d,
                 AVG(top5)  OVER w AS top5_30d,
-                AVG(top10) OVER w AS top10_30d,
-                owner_count AS owners_daily,
-                AVG(owner_count) OVER w AS owners_30d
+                AVG(top10) OVER w AS top10_30d
             FROM daily_shares
             WINDOW w AS (ORDER BY date ROWS BETWEEN 29 PRECEDING AND CURRENT ROW)
+        ),
+        mondays AS (
+            SELECT * FROM rolling
+            WHERE EXTRACT(DOW FROM date) = 1   -- Mondays
+              AND date >= '2020-08-24'
         )
-        SELECT date, top1_30d, top5_30d, top10_30d,
-               owners_daily, owners_30d
-        FROM rolling
-        WHERE EXTRACT(DOW FROM date) = 1   -- Mondays
-          AND date >= '2020-08-24'
-        ORDER BY date
+        SELECT m.date, m.top1_30d, m.top5_30d, m.top10_30d,
+               COUNT(DISTINCT o.owner_id) AS owners_30d
+        FROM mondays m
+        JOIN daily_owner o ON o.date > m.date - INTERVAL 30 DAY AND o.date <= m.date
+        GROUP BY 1, 2, 3, 4
+        ORDER BY m.date
     """).fetchall()
 
     data["decDates"]    = [str(r[0]) for r in rows]
     data["top1"]        = round_list(arr(rows, 1))
     data["top5"]        = round_list(arr(rows, 2))
     data["top10"]       = round_list(arr(rows, 3))
-    data["ownersDaily"] = [int(r[4]) for r in rows]
-    data["owners30d"]   = round_list(arr(rows, 5))
+    data["owners30d"]   = [int(r[4]) for r in rows]
     log(f"  → {len(rows)} weekly samples ({data['decDates'][0]} – {data['decDates'][-1]})")
 
     # ─── 2. Nakamoto coefficient @33% (monthly) ─────────────────────────
@@ -177,11 +223,12 @@ def fetch_all(con, attack_cost_csv=None):
     rows_nk = con.sql(f"""
         WITH monthly_owner AS (
             SELECT DATE_TRUNC('month', d.date) AS month,
-                   s.owner_id,
+                   COALESCE(s.owner_id, d.miner_id) AS owner_id,
                    SUM(d.block_rewards_fil) AS rewards
             FROM '{sp_daily_path}' d
-            JOIN '{sp_static_path}' s ON d.storage_provider_id = s.storage_provider_id
-            GROUP BY month, s.owner_id
+            LEFT JOIN '{owners_path}' s ON d.miner_id = s.miner_id
+            WHERE d.block_rewards_fil > 0
+            GROUP BY 1, 2
         ),
         ranked AS (
             SELECT month, owner_id, rewards,
@@ -273,9 +320,9 @@ def fetch_all(con, attack_cost_csv=None):
         data["stat_nk_peak_date"] = data["nkMonths"][nk_peak_idx]
         data["stat_top5"]     = data["top5"][-1]
         data["stat_top10"]    = data["top10"][-1]
-        data["stat_owners"]   = data["ownersDaily"][-1]
-        data["stat_owners_peak"] = max(data["ownersDaily"])
-        owners_peak_idx = data["ownersDaily"].index(data["stat_owners_peak"])
+        data["stat_owners"]   = data["owners30d"][-1]
+        data["stat_owners_peak"] = max(data["owners30d"])
+        owners_peak_idx = data["owners30d"].index(data["stat_owners_peak"])
         data["stat_owners_peak_date"] = data["decDates"][owners_peak_idx]
         nk_decline = round(100 * (1 - data["stat_nk"] / data["stat_nk_peak"]))
         data["stat_nk_decline"] = f"-{nk_decline}%"
@@ -418,9 +465,9 @@ def build_html(d):
       <div class="stat-sub{' green' if d['stat_top10'] < 33 else ''}">{('below' if d['stat_top10'] < 33 else 'at/above')} 33% threshold</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Active owner_ids</div>
+      <div class="stat-label">Owner_ids with rewards (30d)</div>
       <div class="stat-value">{d['stat_owners']:,}</div>
-      <div class="stat-sub">Peak: {max(d['ownersDaily']):,} ({d['stat_owners_peak_date'][:7]})</div>
+      <div class="stat-sub">Peak: {d['stat_owners_peak']:,} ({d['stat_owners_peak_date'][:7]})</div>
     </div>
     <div class="stat">
       <div class="stat-label">NK decline</div>
@@ -441,7 +488,7 @@ def build_html(d):
   <!-- Owner count -->
   <div class="card">
     <div class="card-title">Owner_ids with rewards</div>
-    <div class="card-sub">Number of unique owner_ids earning block rewards each day</div>
+    <div class="card-sub">Number of unique owner_ids with block rewards in the 30 days up to each Monday. History uses each miner's current owner.</div>
     <div class="chart-wrap-sm"><canvas id="chartOwners"></canvas></div>
     <div class="legend" id="legendOwners"></div>
   </div>
@@ -553,8 +600,7 @@ const decDates    = {json.dumps(d['decDates'])};
 const top1        = {json.dumps(d['top1'])};
 const top5        = {json.dumps(d['top5'])};
 const top10       = {json.dumps(d['top10'])};
-const ownersDaily = {json.dumps(d['ownersDaily'])};
-const owners30d   = {json.dumps(d['owners30d'])};
+const owners30d  = {json.dumps(d['owners30d'])};
 
 const nkMonths  = {json.dumps(d['nkMonths'])};
 const nk33      = {json.dumps(d['nk33'])};
@@ -625,15 +671,12 @@ legendShareEl.appendChild(thEl);
 // CHART 2: Owner count
 // ============================================================
 const ownerSeries = {{
-  "Daily owner_ids": {{ data: ownersDaily, color: "#c4b5fd", width: 1 }},
-  "30d avg": {{ data: owners30d, color: "#7c3aed", width: 2 }},
+  "Owner_ids with rewards (30d)": {{ data: owners30d, color: "#7c3aed", width: 2 }},
 }};
 
 const ownerDatasets = Object.entries(ownerSeries).map(([name, s]) => ({{
-  label: name, data: s.data, borderColor: s.color,
-  backgroundColor: name === "Daily owner_ids" ? s.color + '30' : 'transparent',
-  borderWidth: s.width, pointRadius: 0, pointHoverRadius: 4, tension: 0.3,
-  fill: name === "Daily owner_ids",
+  label: name, data: s.data, borderColor: s.color, backgroundColor: s.color + '30',
+  borderWidth: s.width, pointRadius: 0, pointHoverRadius: 4, tension: 0.3, fill: true,
 }}));
 
 const chartOwners = new Chart(document.getElementById('chartOwners').getContext('2d'), {{
@@ -667,7 +710,7 @@ makeLegend(document.getElementById('legendOwners'), ownerSeries, chartOwners);
 // ============================================================
 const nkSeries = {{
   "Nakamoto @33%": {{ data: nk33, color: "#f97316", width: 2.5 }},
-  "Active owner_ids": {{ data: nkOwners, color: "#999999", width: 1.2 }},
+  "Owner_ids with rewards in the month": {{ data: nkOwners, color: "#999999", width: 1.2 }},
 }};
 
 const nkDatasets = [
@@ -677,7 +720,7 @@ const nkDatasets = [
     pointHoverRadius: 5, tension: 0.3, fill: {{ target: 'origin', alpha: 0.08 }}, yAxisID: 'y',
   }},
   {{
-    label: "Active owner_ids", data: nkOwners, borderColor: "#999999",
+    label: "Owner_ids with rewards in the month", data: nkOwners, borderColor: "#999999",
     backgroundColor: "#99999920", borderWidth: 1.2, borderDash: [6, 3],
     pointRadius: 0, pointHoverRadius: 5, tension: 0.3, fill: false, yAxisID: 'y1',
   }}
@@ -710,7 +753,7 @@ const chartNK = new Chart(document.getElementById('chartNK').getContext('2d'), {
       }},
       y1: {{
         position: 'right',
-        title: {{ display: true, text: 'Active Owner IDs', color: '#6e7681' }},
+        title: {{ display: true, text: 'Owner IDs with rewards in the month', color: '#6e7681' }},
         grid: {{ display: false }}, ticks: {{ color: '#6e7681' }},
         border: {{ color: '#e0e0e0' }}, beginAtZero: true
       }}

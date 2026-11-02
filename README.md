@@ -23,9 +23,9 @@ Data is sourced from the [Filecoin Data Portal](https://filecoindataportal.xyz) 
 
 Companion charts for the [L1 Health Metrics Framework](https://docs.google.com/document/d/1zuFRFTgjRFMagiH8MhMJwmL2FZBMhKP7lAv0ooUb6Jc) report.
 
-- **Decentralization** — reward concentration (top 1/5/10 owner share), active owner count, Nakamoto Coefficient @33%
+- **Decentralization** — reward concentration (top 1/5/10 owner share), count of owners with rewards in the last 30 days, Nakamoto Coefficient @33%
 - **Consensus Security** — estimated 33% attack cost (FIL), total value locked, attack ROI
 
-Data sourced from [Filecoin Data Portal](https://filecoindataportal.xyz) parquet datasets. A GitHub Actions workflow runs `update_dashboard.py` daily at 06:00 UTC to keep charts current. To trigger manually: Actions > Update L1 Health Dashboard > Run workflow.
+Data sourced from [Filecoin Data Portal](https://filecoindataportal.xyz) parquet datasets. Each miner's current owner comes from Filecoin RPC and is saved in `miner_owners.csv`; history uses that current owner. A GitHub Actions workflow runs `update_dashboard.py` daily at 06:00 UTC to keep charts current. To trigger manually: Actions > Update L1 Health Dashboard > Run workflow.
 
 To run locally: `pip install duckdb && python update_dashboard.py`
