@@ -440,6 +440,11 @@ def build_html(d):
 
   <h1>Filecoin L1 Health Metrics</h1>
   <p class="sub">Companion charts for the L1 Health Metrics Framework report &middot; Source: <a href="https://filecoindataportal.xyz" style="color:#666;">Filecoin Data Portal</a> &middot; Generated: {d['generated_at']}</p>
+  <p id="stale" style="display:none;color:#c00;font-weight:600;">Warning: this data was last updated on {d['generated_at'][:10]}. The update may have failed.</p>
+  <script>
+  if (Date.now() - Date.parse("{d['generated_at'][:16].replace(' ', 'T')}Z") > 3 * 86400000)
+    document.getElementById('stale').style.display = 'block';
+  </script>
 
   <!-- ============================================================ -->
   <!-- SECTION 1: DECENTRALIZATION -->
