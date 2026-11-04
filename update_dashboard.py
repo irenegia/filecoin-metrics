@@ -12,13 +12,14 @@ Requirements:
 Usage:
     python update_dashboard.py                     # basic run
     python update_dashboard.py -o dashboard.html   # custom output path
-    python update_dashboard.py --attack-cost-csv "Cost of 33% attack.csv"  # use your spreadsheet for attack cost
 
 Data sources (all from https://data.filecoindataportal.xyz):
     - daily_network_metrics.parquet       (~530 KB)
     - daily_miner_metrics.parquet         (cached locally)
 
 Owners come from Filecoin RPC (StateMinerInfo) and are saved in miner_owners.csv.
+Initial pledge per 32 GiB QAP is saved in pledge_per_qap.csv: up to 2026-02-26 from
+Irene's "Cost of 33% attack (pledge)" sheet, after that from new sectors read on RPC.
 """
 
 import argparse, csv, json, os, sys, time
@@ -38,6 +39,7 @@ SP_DAILY   = f"{BASE_URL}/daily_miner_metrics.parquet"
 RPC_URL    = "https://api.node.glif.io/rpc/v1"
 CACHE_DIR  = Path(__file__).parent / ".cache"
 OWNERS_CSV = Path(__file__).parent / "miner_owners.csv"
+PLEDGE_CSV = Path(__file__).parent / "pledge_per_qap.csv"
 
 # ── Helpers ─────────────────────────────────────────────────────────
 def log(msg):
@@ -64,20 +66,60 @@ def cache_parquet(url: str, name: str, max_age_hours: int = 12) -> str:
     log(f"  Saved {local.stat().st_size / 1e6:.1f} MB → {local}")
     return str(local)
 
-def rpc_owner(miner: str):
-    """Return the miner's current owner from Filecoin RPC, or None on failure."""
+def rpc(method: str, params: list):
+    """Call Filecoin RPC; return the result, or None on failure."""
     import urllib.request
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "Filecoin.StateMinerInfo",
-                       "params": [miner, None]}).encode()
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     req = urllib.request.Request(RPC_URL, body, {"Content-Type": "application/json",
                                                  "User-Agent": "FilecoinDashboard/1.0"})
     for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.load(resp)["result"]["Owner"]
+                return json.load(resp)["result"]
         except Exception:
             time.sleep(2 ** attempt)
     return None
+
+def rpc_owner(miner: str):
+    """Return the miner's current owner from Filecoin RPC, or None on failure."""
+    info = rpc("Filecoin.StateMinerInfo", [miner, None])
+    return info["Owner"] if info else None
+
+def refresh_pledge(max_tipsets: int = 300, want: int = 10) -> str:
+    """Append today's initial pledge per 32 GiB QAP to pledge_per_qap.csv.
+    Reads sectors activated by recent ProveCommitSectors3 (method 34) messages.
+    Since FIP-0118 every new sector has 10x QAP (FULL_QA_POWER, flag bit 2), so a
+    32 GiB sector (SealProof 8) holds 10 x 32 GiB of QAP."""
+    today = datetime.utcnow().date().isoformat()
+    with open(PLEDGE_CSV, newline="") as f:
+        if any(r["date"] == today for r in csv.DictReader(f)):
+            return str(PLEDGE_CSV)
+    values, seen, ts = [], set(), rpc("Filecoin.ChainHead", [])
+    for _ in range(max_tipsets):
+        if not ts or len(values) >= want:
+            break
+        for cid in ts["Cids"]:
+            bm = rpc("Filecoin.ChainGetBlockMessages", [cid]) or {}
+            msgs = (bm.get("BlsMessages") or []) + [s["Message"] for s in bm.get("SecpkMessages") or []]
+            for m in msgs:
+                if m["Method"] != 34 or m["CID"]["/"] in seen or len(values) >= want:
+                    continue
+                seen.add(m["CID"]["/"])
+                p = rpc("Filecoin.StateDecodeParams", [m["To"], 34, m["Params"], ts["Cids"]])
+                sector = p and p["SectorActivations"][0]["SectorNumber"]
+                info = sector is not None and rpc("Filecoin.StateSectorGetInfo", [m["To"], sector, None])
+                if info and info["SealProof"] == 8 and info["Flags"] & 2:
+                    values.append(int(info["InitialPledge"]) / 1e18 / 10)
+        ts = rpc("Filecoin.ChainGetTipSet", [ts["Blocks"][0]["Parents"]])
+    if not values:
+        log("  No new sectors found; pledge not updated today")
+        return str(PLEDGE_CSV)
+    values.sort()
+    median = values[len(values) // 2]
+    with open(PLEDGE_CSV, "a", newline="") as f:
+        csv.writer(f, lineterminator="\n").writerow([today, f"{median:.4f}", "rpc"])
+    log(f"  Pledge per 32 GiB QAP today: {median:.4f} FIL (median of {len(values)} sectors)")
+    return str(PLEDGE_CSV)
 
 def refresh_owners(con, sp_daily_path: str) -> str:
     """Update miner_owners.csv for miners with recent rewards or no saved owner."""
@@ -110,51 +152,8 @@ def arr(rows, col=0):
 def round_list(lst, n=2):
     return [round(x, n) if x is not None else None for x in lst]
 
-def parse_attack_cost_csv(csv_path: str):
-    """Parse Irene's attack-cost spreadsheet CSV.
-    Returns (dates, cost_m, tvl_m, roi) — all weekly-sampled lists.
-    Cost is in millions FIL, TVL in millions FIL.
-    """
-    log(f"  Reading attack cost CSV: {csv_path}")
-    rows = []
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            date = r.get("stateTime", "").strip()
-            cost_raw = r.get("Cost of the 33% attack (FIL)", "").strip()
-            tvl_raw = r.get("Total FIL Locked (M FIL)", "").strip()
-            roi_raw = r.get("33% attack ROI (TVL/Cost)", "").strip()
-            if not date or not cost_raw or cost_raw == "#DIV/0!":
-                continue
-            try:
-                cost_fil = float(cost_raw.replace(",", "")) / 1e6  # raw FIL → millions
-                tvl_m = abs(float(tvl_raw.replace(",", "")))        # abs to handle negative sign
-                roi = float(roi_raw.replace(",", "")) if roi_raw and roi_raw != "#DIV/0!" else None
-                rows.append((date, cost_fil, tvl_m, roi))
-            except (ValueError, TypeError):
-                continue
-
-    # Sample weekly (every 7th row, starting from first Thursday)
-    # Find first Thursday
-    from datetime import date as dt_date
-    weekly = []
-    last_date = None
-    for date_str, cost, tvl, roi in rows:
-        d = dt_date.fromisoformat(date_str)
-        if d.weekday() != 3:  # Thursday
-            continue
-        weekly.append((date_str, cost, tvl, roi))
-
-    log(f"  → {len(weekly)} weekly samples from CSV ({weekly[0][0]} – {weekly[-1][0]})")
-    return (
-        [w[0] for w in weekly],
-        round_list([w[1] for w in weekly]),
-        round_list([w[2] for w in weekly]),
-        round_list([w[3] for w in weekly]),
-    )
-
 # ── Data fetching ───────────────────────────────────────────────────
-def fetch_all(con, attack_cost_csv=None):
+def fetch_all(con):
     """Return dict with all computed metric arrays."""
     log("Fetching network metrics …")
     net_path = NETWORK  # small file, query remote directly
@@ -254,61 +253,32 @@ def fetch_all(con, attack_cost_csv=None):
     log(f"  → {len(rows_nk)} months ({data['nkMonths'][0]} – {data['nkMonths'][-1]})")
 
     # ─── 3. Consensus security ─────────────────────────────────────────
-    if attack_cost_csv:
-        log("Loading attack cost from CSV …")
-        csv_dates, csv_cost, csv_tvl, csv_roi = parse_attack_cost_csv(attack_cost_csv)
+    # Attack cost as in the "Cost of 33% attack (pledge)" sheet:
+    # pledge per 32 GiB QAP x 0.33 x network QAP in 32 GiB units. A week with no
+    # pledge value within 3 days before it has no attack cost (gap in the chart).
+    log("Computing consensus security …")
+    pledge_path = refresh_pledge()
+    rows_net = con.sql(f"""
+        WITH n AS (
+            SELECT date, locked_fil, quality_adjusted_power_pibs FROM '{net_path}'
+            WHERE EXTRACT(DOW FROM date) = 4 AND date >= '2020-10-15'
+        ), p AS (
+            SELECT CAST(date AS DATE) AS date, pledge_per_32gib_qap_fil AS pledge
+            FROM read_csv('{pledge_path}', header = true)
+        ), j AS (
+            SELECT n.*, CASE WHEN n.date - p.date <= 3 THEN p.pledge END AS pledge
+            FROM n ASOF LEFT JOIN p ON n.date >= p.date
+        )
+        SELECT date, locked_fil / 1e6 AS tvl_m,
+            pledge * 0.33 * quality_adjusted_power_pibs * 2^20 / 32 / 1e6 AS attack_cost_m,
+            locked_fil / (pledge * 0.33 * quality_adjusted_power_pibs * 2^20 / 32) AS roi
+        FROM j ORDER BY date
+    """).fetchall()
 
-        # Extend with data portal for dates beyond the CSV
-        last_csv_date = csv_dates[-1]
-        log(f"  CSV ends at {last_csv_date}, checking for newer data …")
-        rows_ext = con.sql(f"""
-            SELECT date,
-                locked_fil / 1e6 AS tvl_m
-            FROM '{net_path}'
-            WHERE EXTRACT(DOW FROM date) = 4
-              AND date > '{last_csv_date}'
-            ORDER BY date
-        """).fetchall()
-
-        if rows_ext:
-            # Extend TVL from data portal; extrapolate attack cost trend
-            last_cost = csv_cost[-1]
-            last_tvl = csv_tvl[-1]
-            for r in rows_ext:
-                new_tvl = round(r[1], 2)
-                # Scale attack cost proportionally to TVL change
-                ratio = new_tvl / last_tvl if last_tvl else 1
-                new_cost = round(last_cost * ratio, 2)
-                new_roi = round(new_tvl / new_cost, 2) if new_cost > 0 else None
-                csv_dates.append(str(r[0]))
-                csv_cost.append(new_cost)
-                csv_tvl.append(new_tvl)
-                csv_roi.append(new_roi)
-            log(f"  Extended with {len(rows_ext)} weeks from data portal (→ {csv_dates[-1]})")
-
-        data["atkDates"]        = csv_dates
-        data["attack_cost_fil"] = csv_cost
-        data["tvl_fil"]         = csv_tvl
-        data["roi_fil"]         = csv_roi
-        data["atk_method"]      = "csv"
-    else:
-        log("Computing consensus security from data portal (approximate) …")
-        rows_net = con.sql(f"""
-            SELECT date,
-                locked_fil / 1e6                     AS tvl_m,
-                pledge_collateral_fil * (33.0/67) / 1e6 AS attack_cost_m,
-                locked_fil / NULLIF(pledge_collateral_fil * (33.0/67), 0) AS roi
-            FROM '{net_path}'
-            WHERE EXTRACT(DOW FROM date) = 4
-              AND date >= '2020-10-01'
-            ORDER BY date
-        """).fetchall()
-
-        data["atkDates"]        = [str(r[0]) for r in rows_net]
-        data["tvl_fil"]         = round_list(arr(rows_net, 1))
-        data["attack_cost_fil"] = round_list(arr(rows_net, 2))
-        data["roi_fil"]         = round_list(arr(rows_net, 3))
-        data["atk_method"]      = "approx"
+    data["atkDates"]        = [str(r[0]) for r in rows_net]
+    data["tvl_fil"]         = round_list(arr(rows_net, 1))
+    data["attack_cost_fil"] = round_list(arr(rows_net, 2))
+    data["roi_fil"]         = round_list(arr(rows_net, 3))
 
     log(f"  → {len(data['atkDates'])} weekly samples ({data['atkDates'][0]} – {data['atkDates'][-1]})")
 
@@ -327,19 +297,11 @@ def fetch_all(con, attack_cost_csv=None):
         nk_decline = round(100 * (1 - data["stat_nk"] / data["stat_nk_peak"]))
         data["stat_nk_decline"] = f"-{nk_decline}%"
 
-    if data["attack_cost_fil"]:
-        data["stat_atk_cost"]     = data["attack_cost_fil"][-1]
-        data["stat_atk_cost_peak"]= max(data["attack_cost_fil"])
-        atk_peak_idx = data["attack_cost_fil"].index(data["stat_atk_cost_peak"])
-        data["stat_atk_cost_peak_date"] = data["atkDates"][atk_peak_idx]
-        data["stat_tvl"]          = data["tvl_fil"][-1]
-        data["stat_tvl_peak"]     = max(data["tvl_fil"])
-        tvl_peak_idx = data["tvl_fil"].index(data["stat_tvl_peak"])
-        data["stat_tvl_peak_date"] = data["atkDates"][tvl_peak_idx]
-        data["stat_roi"]          = data["roi_fil"][-1]
-        data["stat_roi_peak"]     = max(data["roi_fil"])
-        roi_peak_idx = data["roi_fil"].index(data["stat_roi_peak"])
-        data["stat_roi_peak_date"] = data["atkDates"][roi_peak_idx]
+    # Latest and peak over weeks that have a value; the latest date is shown on the card
+    for key, series in [("atk_cost", "attack_cost_fil"), ("tvl", "tvl_fil"), ("roi", "roi_fil")]:
+        pts = [(v, d) for v, d in zip(data[series], data["atkDates"]) if v is not None]
+        data[f"stat_{key}"], data[f"stat_{key}_date"] = pts[-1]
+        data[f"stat_{key}_peak"], data[f"stat_{key}_peak_date"] = max(pts)
 
     data["generated_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     data["dec_range"]    = f"{data['decDates'][0]} – {data['decDates'][-1]}"
@@ -359,13 +321,9 @@ def build_html(d):
     def fmt_peak(val, date):
         return f"Peak: {fmt_m(val)} ({date[:7]})"
 
-    # Date range for methodology note
-    if d.get("atk_method") == "csv":
-        atk_method = ("Attack cost = sectors_for_33% &times; expanding median of on-chain "
-                      "Initial Pledge per 32 GiB QAP (from spreadsheet)")
-    else:
-        atk_method = ("Attack cost &asymp; pledge_collateral &times; (33/67). "
-                      "Approximation &mdash; use --attack-cost-csv for precise methodology.")
+    atk_method = ("Attack cost = Initial Pledge per 32 GiB QAP &times; 0.33 &times; network QA power "
+                  "in 32 GiB units. Pledge per 32 GiB QAP: spreadsheet until 2026-02-26, then the median "
+                  "of new 10&times; sectors read daily from Filecoin RPC. Weeks with no pledge value are left empty.")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -525,7 +483,7 @@ def build_html(d):
     <div class="stat">
       <div class="stat-label">Attack cost (FIL)</div>
       <div class="stat-value">{fmt_m(d['stat_atk_cost'])}</div>
-      <div class="stat-sub">{fmt_peak(d['stat_atk_cost_peak'], d['stat_atk_cost_peak_date'])}</div>
+      <div class="stat-sub">{fmt_peak(d['stat_atk_cost_peak'], d['stat_atk_cost_peak_date'])} &middot; latest: {d['stat_atk_cost_date']}</div>
     </div>
     <div class="stat">
       <div class="stat-label">Total locked (FIL)</div>
@@ -535,7 +493,7 @@ def build_html(d):
     <div class="stat">
       <div class="stat-label">FoF ROI (TVL/Cost)</div>
       <div class="stat-value">{d['stat_roi']:.2f}</div>
-      <div class="stat-sub">Peak: {d['stat_roi_peak']:.2f} ({d['stat_roi_peak_date'][:7]})</div>
+      <div class="stat-sub">Peak: {d['stat_roi_peak']:.2f} ({d['stat_roi_peak_date'][:7]}) &middot; latest: {d['stat_roi_date']}</div>
     </div>
   </div>
 
@@ -858,8 +816,6 @@ def main():
     parser = argparse.ArgumentParser(description="Update Filecoin L1 Health dashboard")
     parser.add_argument("-o", "--output", default=None,
                         help="Output HTML path (default: filecoin_l1_health.html in same dir)")
-    parser.add_argument("--attack-cost-csv", default=None,
-                        help="Path to the 'Cost of 33%% attack' spreadsheet CSV for precise attack cost data")
     args = parser.parse_args()
 
     out_path = args.output or str(Path(__file__).parent / "filecoin_l1_health_dashboard.html")
@@ -868,7 +824,7 @@ def main():
     con = duckdb.connect()
     con.sql("SET threads = 4")
 
-    data = fetch_all(con, attack_cost_csv=args.attack_cost_csv)
+    data = fetch_all(con)
     con.close()
 
     log("Generating HTML …")
