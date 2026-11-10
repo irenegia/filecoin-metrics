@@ -21,7 +21,7 @@ Data is sourced from the [Filecoin Data Portal](https://filecoindataportal.xyz) 
 
 **Live dashboard:** <https://irenegia.github.io/filecoin-metrics/filecoin_l1_health_dashboard.html>
 
-Companion charts for the [L1 Health Metrics Framework](https://docs.google.com/document/d/1zuFRFTgjRFMagiH8MhMJwmL2FZBMhKP7lAv0ooUb6Jc) report.
+Companion charts for the L1 Health Metrics Framework report.
 
 - **Decentralization** — reward concentration (top 1/5/10 owner share), count of owners with rewards in the last 30 days, Nakamoto Coefficient @33%
 - **Consensus Security** — estimated 33% attack cost (FIL), total value locked, attack ROI
